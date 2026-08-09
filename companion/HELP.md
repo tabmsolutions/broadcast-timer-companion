@@ -50,3 +50,19 @@ to build a segmented scoreboard-style display across several buttons, or use
   showing the timer rather than clock-only
 - **Direction is...** — true when the timer's direction matches the
   selected option (Up/Down)
+
+## Presets
+
+Drag these in from Companion's presets panel instead of building buttons by
+hand:
+
+- **Value & Digits** — a full `HH:MM:SS` button, a name button, and six
+  individual digit buttons (for a scoreboard-style layout across separate
+  buttons), all pre-wired with the flashing "expired" feedback
+- **Status Indicators** — one button each for Running, Expired, Timer
+  visible, Direction: Down, and Direction: Up, styled with their matching
+  feedback so they light up on their own
+
+All presets have empty button actions (this module doesn't add actions —
+attach a Generic HTTP action separately if you want the same button to also
+control the timer).

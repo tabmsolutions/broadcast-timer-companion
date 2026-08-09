@@ -47,6 +47,7 @@ class BroadcastTimerInstance extends InstanceBase {
     this.config = config
     this.updateVariableDefinitions()
     this.updateFeedbackDefinitions()
+    this.updatePresetDefinitions()
     this.updateVariableValues()
     this.updateStatus(InstanceStatus.Connecting)
     this.startBlinkTimer()
@@ -140,9 +141,18 @@ class BroadcastTimerInstance extends InstanceBase {
       }
     })
 
-    ws.on('close', () => {
+    ws.on('close', (code, reasonBuf) => {
       if (this.ws !== ws) return // superseded by a newer connection already
-      this.updateStatus(InstanceStatus.Disconnected)
+      const reason = reasonBuf ? reasonBuf.toString() : ''
+      if (code === 1008) {
+        // Server rejected the timer id outright (see server/ws.js) rather
+        // than the connection just dropping — surface that distinctly
+        // instead of a generic "disconnected", since it means the config
+        // needs fixing, not just a network hiccup.
+        this.updateStatus(InstanceStatus.BadConfig, reason || 'Unknown timer id')
+      } else {
+        this.updateStatus(InstanceStatus.Disconnected)
+      }
       this.scheduleReconnect()
     })
 
@@ -270,6 +280,111 @@ class BroadcastTimerInstance extends InstanceBase {
         callback: (feedback) => this.state.direction === feedback.options.direction
       }
     })
+  }
+
+  // Ready-to-drag buttons for every feedback and the variables, so a user
+  // doesn't have to hand-build styling/feedback wiring themselves.
+  updatePresetDefinitions() {
+    const colors = {
+      running: { bgcolor: combineRgb(34, 70, 44), color: combineRgb(255, 255, 255) },
+      expired: { bgcolor: combineRgb(70, 34, 44), color: combineRgb(255, 255, 255) },
+      visible: { bgcolor: combineRgb(45, 74, 99), color: combineRgb(255, 255, 255) },
+      direction: { bgcolor: combineRgb(90, 74, 20), color: combineRgb(255, 255, 255) },
+      idle: { bgcolor: combineRgb(20, 20, 20), color: combineRgb(180, 180, 180) },
+      digit: { bgcolor: combineRgb(0, 0, 0), color: combineRgb(255, 215, 0) }
+    }
+    const noOptionFeedback = (feedbackId, style) => ({ feedbackId, options: {}, style })
+
+    const presets = {}
+
+    presets.value = {
+      type: 'simple',
+      name: 'Full timer value (HH:MM:SS)',
+      style: { text: '$(broadcast-timer:value)', size: '18', color: colors.digit.color, bgcolor: colors.digit.bgcolor },
+      steps: [{ down: [], up: [] }],
+      feedbacks: [noOptionFeedback('expired', colors.expired)]
+    }
+
+    presets.name = {
+      type: 'simple',
+      name: 'Timer name',
+      style: { text: '$(broadcast-timer:name)', size: '14', color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      steps: [{ down: [], up: [] }],
+      feedbacks: []
+    }
+
+    const digitLabels = {
+      digit_h1: 'Digit: Hours - tens',
+      digit_h2: 'Digit: Hours - ones',
+      digit_m1: 'Digit: Minutes - tens',
+      digit_m2: 'Digit: Minutes - ones',
+      digit_s1: 'Digit: Seconds - tens',
+      digit_s2: 'Digit: Seconds - ones'
+    }
+    for (const [varId, label] of Object.entries(digitLabels)) {
+      presets[varId] = {
+        type: 'simple',
+        name: label,
+        style: { text: `$(broadcast-timer:${varId})`, size: '44', color: colors.digit.color, bgcolor: colors.digit.bgcolor },
+        steps: [{ down: [], up: [] }],
+        feedbacks: [noOptionFeedback('expired', colors.expired)]
+      }
+    }
+
+    presets.running = {
+      type: 'simple',
+      name: 'Running indicator',
+      style: { text: 'RUNNING', size: '14', color: colors.idle.color, bgcolor: colors.idle.bgcolor },
+      steps: [{ down: [], up: [] }],
+      feedbacks: [noOptionFeedback('running', colors.running)]
+    }
+
+    presets.expired = {
+      type: 'simple',
+      name: 'Expired indicator (flashes)',
+      style: { text: 'EXPIRED', size: '14', color: colors.idle.color, bgcolor: colors.idle.bgcolor },
+      steps: [{ down: [], up: [] }],
+      feedbacks: [noOptionFeedback('expired', colors.expired)]
+    }
+
+    presets.visible = {
+      type: 'simple',
+      name: 'Timer visible indicator',
+      style: { text: 'ON DISPLAY', size: '14', color: colors.idle.color, bgcolor: colors.idle.bgcolor },
+      steps: [{ down: [], up: [] }],
+      feedbacks: [noOptionFeedback('visible', colors.visible)]
+    }
+
+    presets.direction_down = {
+      type: 'simple',
+      name: 'Direction: Down indicator',
+      style: { text: '▼ DOWN', size: '14', color: colors.idle.color, bgcolor: colors.idle.bgcolor },
+      steps: [{ down: [], up: [] }],
+      feedbacks: [{ feedbackId: 'direction', options: { direction: 'down' }, style: colors.direction }]
+    }
+
+    presets.direction_up = {
+      type: 'simple',
+      name: 'Direction: Up indicator',
+      style: { text: '▲ UP', size: '14', color: colors.idle.color, bgcolor: colors.idle.bgcolor },
+      steps: [{ down: [], up: [] }],
+      feedbacks: [{ feedbackId: 'direction', options: { direction: 'up' }, style: colors.direction }]
+    }
+
+    const structure = [
+      {
+        id: 'value-and-digits',
+        name: 'Value & Digits',
+        definitions: ['value', 'name', 'digit_h1', 'digit_h2', 'digit_m1', 'digit_m2', 'digit_s1', 'digit_s2']
+      },
+      {
+        id: 'status',
+        name: 'Status Indicators',
+        definitions: ['running', 'expired', 'visible', 'direction_down', 'direction_up']
+      }
+    ]
+
+    this.setPresetDefinitions(structure, presets)
   }
 }
 
