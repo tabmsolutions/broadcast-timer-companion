@@ -5,6 +5,7 @@
   "main": "main.js",
   "license": "MIT",
   "scripts": {
+    "build": "companion-module-build",
     "check": "companion-module-check"
   },
   "dependencies": {
