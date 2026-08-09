@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/bitfocus/companion-module-base/main/assets/manifest.schema.json",
+  "type": "connection",
+  "id": "broadcast-timer",
+  "name": "Broadcast Timer",
+  "shortname": "broadcasttimer",
+  "description": "Feedback and per-digit variables for a self-hosted broadcast time-of-day clock / count up-down timer server (https://github.com/kgtpuck/broadcast-timer). Read-only companion to that server's REST API — use the Generic HTTP module for actions (start/stop/reset/set/digit/direction/show/hide); this module only adds live status feedback and variables.",
+  "version": "1.0.0",
+  "license": "MIT",
+  "repository": "https://github.com/kgtpuck/broadcast-timer-companion",
+  "bugs": "https://github.com/kgtpuck/broadcast-timer-companion/issues",
+  "maintainers": [
+    {
+      "name": "kgtpuck",
+      "email": "kgtpuck@gmail.com",
+      "github": "kgtpuck"
+    }
+  ],
+  "legacyIds": [],
+  "runtime": {
+    "type": "node22",
+    "api": "nodejs-ipc",
+    "apiVersion": "2.1.2",
+    "entrypoint": "main.js"
+  },
+  "manufacturer": "kgtpuck",
+  "products": ["Broadcast Timer"],
+  "keywords": ["timer", "clock", "countdown", "broadcast", "stopwatch"]
+}

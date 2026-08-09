@@ -1,0 +1,276 @@
+import { InstanceBase, InstanceStatus, Regex, combineRgb } from '@companion-module/base'
+import WebSocket from 'ws'
+
+const DEFAULT_STATE = {
+  name: '',
+  mode: 'clock',
+  running: false,
+  expired: false,
+  direction: 'down',
+  valueSeconds: 0
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+
+function formatDuration(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds))
+  const hh = Math.floor(s / 3600)
+  const mm = Math.floor((s % 3600) / 60)
+  const ss = s % 60
+  return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`
+}
+
+// Feedback/variables only, by design: this module never sends commands to
+// the server. Actions (start/stop/reset/set/direction/digit/show/hide) stay
+// on Companion's built-in Generic HTTP module, unchanged. Any number of
+// controllers can drive a timer at once — Generic HTTP buttons, this
+// module's own Companion instance, the server's own /control web page, or
+// several of any of those simultaneously — because the server holds one
+// authoritative state per timer and broadcasts every change over
+// WebSocket to all subscribers, this module included. See
+// https://github.com/kgtpuck/broadcast-timer for the server and its REST API.
+class BroadcastTimerInstance extends InstanceBase {
+  constructor(internal) {
+    super(internal)
+    this.ws = null
+    this.reconnectTimer = null
+    this.reconnectDelay = 1000
+    this.blinkTimer = null
+    this.blinkPhase = false
+    this.destroyed = false
+    this.state = { ...DEFAULT_STATE }
+  }
+
+  async init(config) {
+    this.config = config
+    this.updateVariableDefinitions()
+    this.updateFeedbackDefinitions()
+    this.updateVariableValues()
+    this.updateStatus(InstanceStatus.Connecting)
+    this.startBlinkTimer()
+    this.connect()
+  }
+
+  async destroy() {
+    this.destroyed = true
+    this.stopBlinkTimer()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.ws) {
+      this.ws.removeAllListeners()
+      this.ws.close()
+      this.ws = null
+    }
+  }
+
+  async configUpdated(config) {
+    this.config = config
+    this.reconnectDelay = 1000
+    if (this.ws) {
+      this.ws.removeAllListeners()
+      this.ws.close()
+      this.ws = null
+    }
+    this.connect()
+  }
+
+  getConfigFields() {
+    return [
+      {
+        type: 'textinput',
+        id: 'host',
+        label: 'Server host / IP',
+        width: 6,
+        default: '127.0.0.1',
+        regex: Regex.HOSTNAME
+      },
+      {
+        type: 'textinput',
+        id: 'port',
+        label: 'Server port',
+        width: 3,
+        default: '3000',
+        regex: Regex.PORT
+      },
+      {
+        type: 'textinput',
+        id: 'timerId',
+        label: 'Timer id',
+        width: 3,
+        default: 'timer1',
+        tooltip: 'The id shown on the timer\'s card in /admin, e.g. "timer1". One module instance watches one timer.'
+      }
+    ]
+  }
+
+  wsUrl() {
+    const host = (this.config && this.config.host) || '127.0.0.1'
+    const port = (this.config && this.config.port) || '3000'
+    const timerId = (this.config && this.config.timerId) || 'timer1'
+    return `ws://${host}:${port}/ws?timer=${encodeURIComponent(timerId)}`
+  }
+
+  connect() {
+    if (this.destroyed) return
+    let ws
+    try {
+      ws = new WebSocket(this.wsUrl())
+    } catch (e) {
+      this.updateStatus(InstanceStatus.ConnectionFailure, e.message)
+      this.scheduleReconnect()
+      return
+    }
+    this.ws = ws
+
+    ws.on('open', () => {
+      this.reconnectDelay = 1000
+      this.updateStatus(InstanceStatus.Ok)
+    })
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'state' && msg.timer) this.applyState(msg.timer)
+      } catch (e) {
+        this.log('warn', `Failed to parse server message: ${e.message}`)
+      }
+    })
+
+    ws.on('close', () => {
+      if (this.ws !== ws) return // superseded by a newer connection already
+      this.updateStatus(InstanceStatus.Disconnected)
+      this.scheduleReconnect()
+    })
+
+    ws.on('error', (err) => {
+      this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
+    })
+  }
+
+  scheduleReconnect() {
+    if (this.destroyed || this.reconnectTimer) return
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.connect()
+    }, this.reconnectDelay)
+    this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, 15000)
+  }
+
+  applyState(t) {
+    this.state = {
+      name: t.name || '',
+      mode: t.mode || 'clock',
+      running: !!t.running,
+      expired: !!t.expired,
+      direction: t.direction || 'down',
+      valueSeconds: typeof t.valueSeconds === 'number' ? t.valueSeconds : 0
+    }
+    this.updateVariableValues()
+    this.checkFeedbacks('running', 'expired', 'visible', 'direction')
+  }
+
+  updateVariableDefinitions() {
+    this.setVariableDefinitions({
+      name: { name: 'Timer name' },
+      value: { name: 'Full value, HH:MM:SS' },
+      digit_h1: { name: 'Hours - tens digit' },
+      digit_h2: { name: 'Hours - ones digit' },
+      digit_m1: { name: 'Minutes - tens digit' },
+      digit_m2: { name: 'Minutes - ones digit' },
+      digit_s1: { name: 'Seconds - tens digit' },
+      digit_s2: { name: 'Seconds - ones digit' },
+      mode: { name: 'Mode (clock or timer)' },
+      running: { name: 'Running (yes/no)' },
+      direction: { name: 'Direction (up/down)' },
+      expired: { name: 'Expired (yes/no)' }
+    })
+  }
+
+  updateVariableValues() {
+    const text = formatDuration(this.state.valueSeconds)
+    const digits = text.replace(/:/g, '').split('')
+    this.setVariableValues({
+      name: this.state.name,
+      value: text,
+      digit_h1: digits[0],
+      digit_h2: digits[1],
+      digit_m1: digits[2],
+      digit_m2: digits[3],
+      digit_s1: digits[4],
+      digit_s2: digits[5],
+      mode: this.state.mode,
+      running: this.state.running ? 'yes' : 'no',
+      direction: this.state.direction,
+      expired: this.state.expired ? 'yes' : 'no'
+    })
+  }
+
+  // Companion has no native "blink" primitive; a feedback just re-evaluates
+  // when told to. Toggling blinkPhase and re-checking the 'expired'
+  // feedback on an interval is what makes the button flash.
+  startBlinkTimer() {
+    this.blinkTimer = setInterval(() => {
+      this.blinkPhase = !this.blinkPhase
+      if (this.state.expired && !this.state.running) this.checkFeedbacks('expired')
+    }, 500)
+  }
+
+  stopBlinkTimer() {
+    if (this.blinkTimer) clearInterval(this.blinkTimer)
+    this.blinkTimer = null
+  }
+
+  updateFeedbackDefinitions() {
+    this.setFeedbackDefinitions({
+      running: {
+        type: 'boolean',
+        name: 'Timer running',
+        description: 'True while the timer is actively counting up or down',
+        defaultStyle: { bgcolor: combineRgb(34, 70, 44), color: combineRgb(255, 255, 255) },
+        options: [],
+        callback: () => this.state.running
+      },
+      expired: {
+        type: 'boolean',
+        name: 'Timer expired (flashes)',
+        description: 'True on alternating ~500ms ticks while a countdown has hit zero and stopped, for a flashing button',
+        defaultStyle: { bgcolor: combineRgb(70, 34, 44), color: combineRgb(255, 255, 255) },
+        options: [],
+        callback: () => this.state.expired && !this.state.running && this.blinkPhase
+      },
+      visible: {
+        type: 'boolean',
+        name: 'Timer visible on display (mode = timer)',
+        description: 'True when the display is showing the timer, as opposed to clock-only',
+        defaultStyle: { bgcolor: combineRgb(45, 74, 99), color: combineRgb(255, 255, 255) },
+        options: [],
+        callback: () => this.state.mode === 'timer'
+      },
+      direction: {
+        type: 'boolean',
+        name: 'Direction is...',
+        description: "True when the timer's current count direction matches the selected option",
+        defaultStyle: { bgcolor: combineRgb(90, 74, 20), color: combineRgb(255, 255, 255) },
+        options: [
+          {
+            type: 'dropdown',
+            id: 'direction',
+            label: 'Direction',
+            default: 'down',
+            choices: [
+              { id: 'down', label: 'Down' },
+              { id: 'up', label: 'Up' }
+            ]
+          }
+        ],
+        callback: (feedback) => this.state.direction === feedback.options.direction
+      }
+    })
+  }
+}
+
+export default BroadcastTimerInstance

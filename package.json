@@ -1,0 +1,17 @@
+{
+  "name": "companion-module-broadcast-timer",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "check": "companion-module-check"
+  },
+  "dependencies": {
+    "@companion-module/base": "^2.1.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@companion-module/tools": "^3.0.2"
+  }
+}
