@@ -1,21 +1,19 @@
 # companion-module-broadcast-timer
 
-A [Bitfocus Companion](https://bitfocus.io/companion) module providing
-**feedback and variables** for a self-hosted
-[broadcast-timer](https://github.com/kgtpuck/broadcast-timer) server (a
-time-of-day clock / count up-down timer for broadcast use).
-
-This module is deliberately **read-only** — it never sends commands. It
-connects to the server's WebSocket state feed and exposes live values as
-Companion variables and feedbacks, so you can show the actual countdown
-digits, running state, etc. on Companion buttons. All control
-(start/stop/reset/set time/direction/digit entry/show/hide) stays on
-Companion's built-in **Generic HTTP** module hitting the server's REST API —
-this module doesn't touch or replace that, it's purely additive.
+A [Bitfocus Companion](https://bitfocus.io/companion) module for a
+self-hosted [broadcast-timer](https://github.com/kgtpuck/broadcast-timer)
+server (a time-of-day clock / count up-down timer for broadcast use), with
+both **full control** (actions for start/stop/reset/set time/direction/
+digit entry/show/hide — the entire REST API) and **live feedback** (variables
+and feedbacks Companion's built-in Generic HTTP module has no way to
+provide). One module instead of two: install this and you don't need a
+separate Generic HTTP connection for the same timer, though you still can if
+you'd rather — the actions here just POST to the same REST endpoints Generic
+HTTP would call by hand.
 
 Because the server holds one authoritative state per timer and broadcasts
 every change to all subscribers, any number of controllers can drive or
-watch a timer at once: Generic HTTP buttons, this module, the server's own
+watch a timer at once: this module, Generic HTTP buttons, the server's own
 `/control/:id` web page, multiple Companion instances — simultaneously, with
 no conflict.
 

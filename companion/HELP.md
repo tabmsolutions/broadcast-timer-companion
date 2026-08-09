@@ -1,17 +1,16 @@
 # Broadcast Timer
 
-Live feedback and variables for a self-hosted
+Full control plus live feedback and variables for a self-hosted
 [broadcast-timer](https://github.com/kgtpuck/broadcast-timer) server — a
-time-of-day clock / count up-down timer, normally controlled from Companion
-via the built-in **Generic HTTP** module.
+time-of-day clock / count up-down timer for broadcast use.
 
-**This module does not send any commands.** It only reads live state over a
-WebSocket and exposes it as variables and feedbacks. Keep using Generic HTTP
-(or the server's own `/control/:id` web page) for start/stop/reset/set/
-direction/digit/show/hide — this module is a read-only companion to that,
-not a replacement. Any number of controllers (Generic HTTP buttons, this
-module, the web control page, several Companion instances) can drive or
-watch the same timer at once; the server broadcasts state to everyone.
+**You don't need Companion's Generic HTTP module for this timer anymore** —
+every action below just POSTs to the same REST endpoints Generic HTTP would,
+so this one module covers both control and feedback. If you already have
+Generic HTTP buttons set up for this timer, they keep working fine alongside
+this module — the server treats every controller the same way and broadcasts
+state to all of them, whether that's Generic HTTP, this module, the server's
+own `/control/:id` web page, or several Companion instances at once.
 
 ## Setup
 
@@ -51,6 +50,20 @@ All value/digit variables update live once a second while the timer is
 running, independent of the server's discrete start/stop/set events — they
 won't sit frozen between those events.
 
+## Actions
+
+| Action | Options | Notes |
+|---|---|---|
+| **Start** | — | Starts counting up/down |
+| **Stop** | — | Pauses, keeping the current value |
+| **Reset** | — | Elapsed time back to zero; keeps configured duration/direction |
+| **Set direction** | Direction: Up/Down | Folds current elapsed value and stops the timer if it was running — press Start again after |
+| **Set time** | Hours, Minutes, Seconds | Ignored while running — Stop or Reset first |
+| **Send digit** | Digit: 0–9 | Keypad-style entry: shifts one digit into a 6-digit HHMMSS buffer from the right (e.g. 1,2,3,0,0 → `00:12:30`). Ignored while running |
+| **Clear entry** | — | Resets the digit-entry buffer to zero |
+| **Show timer** | — | Display shows the timer (mode = timer) |
+| **Hide timer** | — | Display goes back to clock-only |
+
 ## Feedbacks
 
 - **Timer running** — true while counting up/down
@@ -69,11 +82,16 @@ hand:
 - **Value & Digits** — full-value buttons for `HH:MM:SS`, `MM:SS`, and
   `SS`-only, a name button, and six individual digit buttons (for a
   scoreboard-style layout across separate buttons), all pre-wired with the
-  flashing "expired" feedback
+  flashing "expired" feedback. Display-only — no action attached.
 - **Status Indicators** — one button each for Running, Expired, Timer
   visible, Direction: Down, and Direction: Up, styled with their matching
-  feedback so they light up on their own
-
-All presets have empty button actions (this module doesn't add actions —
-attach a Generic HTTP action separately if you want the same button to also
-control the timer).
+  feedback so they light up on their own. Display-only — no action attached.
+- **Transport** — Start, Stop, Reset, Show, Hide, Count down, Count up. Start
+  lights up green while running; Show lights up blue while the timer is
+  visible; Count down/up light up while that's the active direction — these
+  double as both the control and its own status indicator on one button.
+- **Keypad** — one button per digit (0–9) plus Clear, for a numeric entry pad
+  matching the server's own `/control` page.
+- **Quick Set** — Set 1:00, Set 5:00, Set 10:00 as starting points for common
+  segment lengths. Duplicate and edit a button's Hours/Minutes/Seconds
+  options for other durations.

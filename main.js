@@ -22,15 +22,16 @@ function formatDuration(totalSeconds) {
   return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`
 }
 
-// Feedback/variables only, by design: this module never sends commands to
-// the server. Actions (start/stop/reset/set/direction/digit/show/hide) stay
-// on Companion's built-in Generic HTTP module, unchanged. Any number of
-// controllers can drive a timer at once — Generic HTTP buttons, this
-// module's own Companion instance, the server's own /control web page, or
-// several of any of those simultaneously — because the server holds one
-// authoritative state per timer and broadcasts every change over
-// WebSocket to all subscribers, this module included. See
-// https://github.com/kgtpuck/broadcast-timer for the server and its REST API.
+// Actions here are a thin wrapper around the same REST endpoints Companion's
+// built-in Generic HTTP module can already call directly — this module adds
+// feedback/variables (which Generic HTTP can't do) plus friendlier presets,
+// but doesn't require Generic HTTP or replace it: use either, or both on the
+// same timer at once. Any number of controllers can drive a timer
+// simultaneously — Generic HTTP buttons, this module, the server's own
+// /control web page — because the server holds one authoritative state per
+// timer and broadcasts every change over WebSocket to all subscribers, this
+// module included. See https://github.com/kgtpuck/broadcast-timer for the
+// server and its REST API.
 class BroadcastTimerInstance extends InstanceBase {
   constructor(internal) {
     super(internal)
@@ -54,6 +55,7 @@ class BroadcastTimerInstance extends InstanceBase {
     this.config = config
     this.updateVariableDefinitions()
     this.updateFeedbackDefinitions()
+    this.updateActionDefinitions()
     this.updatePresetDefinitions()
     this.updateVariableValues()
     this.updateStatus(InstanceStatus.Connecting)
@@ -122,6 +124,35 @@ class BroadcastTimerInstance extends InstanceBase {
     const port = (this.config && this.config.port) || '3000'
     const timerId = (this.config && this.config.timerId) || 'timer1'
     return `ws://${host}:${port}/ws?timer=${encodeURIComponent(timerId)}`
+  }
+
+  restBaseUrl() {
+    const host = (this.config && this.config.host) || '127.0.0.1'
+    const port = (this.config && this.config.port) || '3000'
+    const timerId = (this.config && this.config.timerId) || 'timer1'
+    return `http://${host}:${port}/api/timers/${encodeURIComponent(timerId)}`
+  }
+
+  // Fire-and-log a POST to one of the server's action endpoints (the same
+  // ones Generic HTTP would call). The resulting state change arrives back
+  // over the already-open WebSocket, so there's no need to update local
+  // state here — just report failures, since a button press with no
+  // feedback of failure is a bad experience for an operator mid-show.
+  async postCommand(path, body) {
+    const url = `${this.restBaseUrl()}${path}`
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        this.log('warn', `${path} failed: HTTP ${res.status} ${text}`)
+      }
+    } catch (e) {
+      this.log('warn', `${path} failed: ${e.message}`)
+    }
   }
 
   connect() {
@@ -330,6 +361,86 @@ class BroadcastTimerInstance extends InstanceBase {
     })
   }
 
+  // Mirrors server/routes/api.js exactly. These call the same endpoints
+  // Generic HTTP would; this module doesn't need Generic HTTP installed to
+  // control the timer, but doesn't mind if it's there too.
+  updateActionDefinitions() {
+    const digitChoices = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => ({ id: d, label: d }))
+
+    this.setActionDefinitions({
+      start: {
+        name: 'Start',
+        description: 'Start the timer counting up/down',
+        options: [],
+        callback: async () => this.postCommand('/start')
+      },
+      stop: {
+        name: 'Stop',
+        description: 'Pause the timer, keeping its current value',
+        options: [],
+        callback: async () => this.postCommand('/stop')
+      },
+      reset: {
+        name: 'Reset',
+        description: 'Reset elapsed time to zero (keeps the configured duration and direction)',
+        options: [],
+        callback: async () => this.postCommand('/reset')
+      },
+      direction: {
+        name: 'Set direction',
+        description: "Switch between counting up and down. Folds the timer's current elapsed value and stops it if it was running — press Start again afterward.",
+        options: [
+          {
+            type: 'dropdown',
+            id: 'direction',
+            label: 'Direction',
+            default: 'down',
+            choices: [
+              { id: 'down', label: 'Down' },
+              { id: 'up', label: 'Up' }
+            ]
+          }
+        ],
+        callback: async (action) => this.postCommand('/direction', { direction: action.options.direction })
+      },
+      set: {
+        name: 'Set time',
+        description: 'Set the timer to a specific HH:MM:SS. Ignored while the timer is running — stop or reset it first.',
+        options: [
+          { type: 'number', id: 'hh', label: 'Hours', default: 0, min: 0, max: 99 },
+          { type: 'number', id: 'mm', label: 'Minutes', default: 5, min: 0, max: 59 },
+          { type: 'number', id: 'ss', label: 'Seconds', default: 0, min: 0, max: 59 }
+        ],
+        callback: async (action) =>
+          this.postCommand('/set', { hh: action.options.hh, mm: action.options.mm, ss: action.options.ss })
+      },
+      digit: {
+        name: 'Send digit',
+        description: "Keypad-style entry: shifts one digit into a 6-digit HHMMSS buffer from the right, e.g. pressing 1,2,3,0,0 sets 00:12:30. Ignored while the timer is running.",
+        options: [{ type: 'dropdown', id: 'digit', label: 'Digit', default: '0', choices: digitChoices }],
+        callback: async (action) => this.postCommand('/digit', { digit: action.options.digit })
+      },
+      clear: {
+        name: 'Clear entry',
+        description: 'Reset the digit-entry buffer to zero',
+        options: [],
+        callback: async () => this.postCommand('/clear')
+      },
+      show: {
+        name: 'Show timer',
+        description: 'Switch the display to show the timer (mode = timer), alongside the clock',
+        options: [],
+        callback: async () => this.postCommand('/show')
+      },
+      hide: {
+        name: 'Hide timer',
+        description: 'Switch the display back to clock-only (mode = clock)',
+        options: [],
+        callback: async () => this.postCommand('/hide')
+      }
+    })
+  }
+
   // Ready-to-drag buttons for every feedback and the variables, so a user
   // doesn't have to hand-build styling/feedback wiring themselves.
   updatePresetDefinitions() {
@@ -435,6 +546,98 @@ class BroadcastTimerInstance extends InstanceBase {
       feedbacks: [{ feedbackId: 'direction', options: { direction: 'up' }, style: colors.direction }]
     }
 
+    // --- Transport: action + the feedback that makes sense to pair with it,
+    // so e.g. Start visibly lights up green once the timer is actually
+    // running, rather than being a plain unstateful button like Generic
+    // HTTP would give you.
+    const actionOnly = (actionId, options = {}) => ({
+      type: 'simple',
+      steps: [{ down: [{ actionId, options }], up: [] }]
+    })
+
+    presets.act_start = {
+      ...actionOnly('start'),
+      name: 'Start',
+      style: { text: 'START', size: '18', color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: [noOptionFeedback('running', colors.running)]
+    }
+
+    presets.act_stop = {
+      ...actionOnly('stop'),
+      name: 'Stop',
+      style: { text: 'STOP', size: '18', color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: []
+    }
+
+    presets.act_reset = {
+      ...actionOnly('reset'),
+      name: 'Reset',
+      style: { text: 'RESET', size: '18', color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: []
+    }
+
+    presets.act_show = {
+      ...actionOnly('show'),
+      name: 'Show timer',
+      style: { text: 'SHOW', size: 16, color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: [noOptionFeedback('visible', colors.visible)]
+    }
+
+    presets.act_hide = {
+      ...actionOnly('hide'),
+      name: 'Hide timer (clock only)',
+      style: { text: 'HIDE', size: 16, color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: []
+    }
+
+    presets.act_direction_down = {
+      ...actionOnly('direction', { direction: 'down' }),
+      name: 'Count down',
+      style: { text: '▼ DOWN', size: 16, color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: [{ feedbackId: 'direction', options: { direction: 'down' }, style: colors.direction }]
+    }
+
+    presets.act_direction_up = {
+      ...actionOnly('direction', { direction: 'up' }),
+      name: 'Count up',
+      style: { text: '▲ UP', size: 16, color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: [{ feedbackId: 'direction', options: { direction: 'up' }, style: colors.direction }]
+    }
+
+    // --- Keypad: one button per digit plus Clear, for building a numeric
+    // entry pad that mirrors the server's own /control page.
+    for (const d of ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']) {
+      presets[`act_digit_${d}`] = {
+        ...actionOnly('digit', { digit: d }),
+        name: `Send digit ${d}`,
+        style: { text: d, size: '30', color: colors.digit.color, bgcolor: colors.digit.bgcolor },
+        feedbacks: []
+      }
+    }
+
+    presets.act_clear = {
+      ...actionOnly('clear'),
+      name: 'Clear entry',
+      style: { text: 'CLEAR', size: 16, color: combineRgb(255, 157, 157), bgcolor: combineRgb(58, 30, 34) },
+      feedbacks: []
+    }
+
+    // --- Quick set: a few common broadcast segment lengths as starting
+    // points -- duplicate and edit the HH/MM/SS action options for others.
+    const quickSets = [
+      { id: 'act_set_1m', label: 'Set 1:00', mm: 1 },
+      { id: 'act_set_5m', label: 'Set 5:00', mm: 5 },
+      { id: 'act_set_10m', label: 'Set 10:00', mm: 10 }
+    ]
+    for (const q of quickSets) {
+      presets[q.id] = {
+        ...actionOnly('set', { hh: 0, mm: q.mm, ss: 0 }),
+        name: q.label,
+        style: { text: q.label, size: 16, color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+        feedbacks: []
+      }
+    }
+
     const structure = [
       {
         id: 'value-and-digits',
@@ -445,6 +648,25 @@ class BroadcastTimerInstance extends InstanceBase {
         id: 'status',
         name: 'Status Indicators',
         definitions: ['running', 'expired', 'visible', 'direction_down', 'direction_up']
+      },
+      {
+        id: 'transport',
+        name: 'Transport',
+        definitions: ['act_start', 'act_stop', 'act_reset', 'act_show', 'act_hide', 'act_direction_down', 'act_direction_up']
+      },
+      {
+        id: 'keypad',
+        name: 'Keypad',
+        definitions: [
+          'act_digit_0', 'act_digit_1', 'act_digit_2', 'act_digit_3', 'act_digit_4',
+          'act_digit_5', 'act_digit_6', 'act_digit_7', 'act_digit_8', 'act_digit_9',
+          'act_clear'
+        ]
+      },
+      {
+        id: 'quick-set',
+        name: 'Quick Set',
+        definitions: quickSets.map((q) => q.id)
       }
     ]
 
