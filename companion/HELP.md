@@ -28,6 +28,8 @@ instance per timer. For each instance, set:
 | Variable | Example | Notes |
 |---|---|---|
 | `value` | `00:12:30` | Full HH:MM:SS on one variable, for a single button |
+| `value_mmss` | `12:30` | Same value as MM:SS. Minutes are *not* capped at 59 — a 2-hour value reads `120:00`, not wrapped back into hours |
+| `value_ss` | `750` | Same value as total whole seconds, no colons. Pads to 2 digits minimum (`05`), grows past that naturally for longer totals |
 | `digit_h1`, `digit_h2` | `0`, `0` | Hours, tens/ones digit |
 | `digit_m1`, `digit_m2` | `1`, `2` | Minutes, tens/ones digit |
 | `digit_s1`, `digit_s2` | `3`, `0` | Seconds, tens/ones digit |
@@ -37,9 +39,17 @@ instance per timer. For each instance, set:
 | `direction` | `down` | `up` or `down` |
 | `expired` | `no` | `yes` once a countdown hits zero, until reset |
 
-Put a digit variable (e.g. `$(broadcast-timer:digit_m1)`) on its own button
-to build a segmented scoreboard-style display across several buttons, or use
-`$(broadcast-timer:value)` for the whole thing on one button.
+For a segmented scoreboard-style display across several buttons, the
+per-digit variables already compose to whatever width you need — use
+`digit_m1`/`digit_m2`/`digit_s1`/`digit_s2` alone for an MM:SS panel, or just
+`digit_s1`/`digit_s2` for an SS-only panel; skipping `digit_h1`/`digit_h2`
+is enough, no separate digit set is needed. `value`/`value_mmss`/`value_ss`
+exist for the single-button case, where you want one of those widths as one
+compact string instead of separate digit buttons.
+
+All value/digit variables update live once a second while the timer is
+running, independent of the server's discrete start/stop/set events — they
+won't sit frozen between those events.
 
 ## Feedbacks
 
@@ -56,9 +66,10 @@ to build a segmented scoreboard-style display across several buttons, or use
 Drag these in from Companion's presets panel instead of building buttons by
 hand:
 
-- **Value & Digits** — a full `HH:MM:SS` button, a name button, and six
-  individual digit buttons (for a scoreboard-style layout across separate
-  buttons), all pre-wired with the flashing "expired" feedback
+- **Value & Digits** — full-value buttons for `HH:MM:SS`, `MM:SS`, and
+  `SS`-only, a name button, and six individual digit buttons (for a
+  scoreboard-style layout across separate buttons), all pre-wired with the
+  flashing "expired" feedback
 - **Status Indicators** — one button each for Running, Expired, Timer
   visible, Direction: Down, and Direction: Up, styled with their matching
   feedback so they light up on their own

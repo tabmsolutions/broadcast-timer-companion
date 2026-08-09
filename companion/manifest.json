@@ -5,7 +5,7 @@
   "name": "Broadcast Timer",
   "shortname": "broadcasttimer",
   "description": "Feedback and per-digit variables for a self-hosted broadcast time-of-day clock / count up-down timer server (https://github.com/kgtpuck/broadcast-timer). Read-only companion to that server's REST API — use the Generic HTTP module for actions (start/stop/reset/set/digit/direction/show/hide); this module only adds live status feedback and variables.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "license": "MIT",
   "repository": "https://github.com/kgtpuck/broadcast-timer-companion",
   "bugs": "https://github.com/kgtpuck/broadcast-timer-companion/issues",

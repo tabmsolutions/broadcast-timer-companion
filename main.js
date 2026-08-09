@@ -39,8 +39,15 @@ class BroadcastTimerInstance extends InstanceBase {
     this.reconnectDelay = 1000
     this.blinkTimer = null
     this.blinkPhase = false
+    this.tickTimer = null
     this.destroyed = false
     this.state = { ...DEFAULT_STATE }
+    // Anchor for local interpolation between WebSocket pushes: the server
+    // only pushes on discrete state changes (start/stop/set/...), not on
+    // every tick of a running countdown, so without this the displayed
+    // value would sit frozen at whatever it was when the timer started.
+    this.anchorValueSeconds = 0
+    this.anchorAtMs = Date.now()
   }
 
   async init(config) {
@@ -51,12 +58,14 @@ class BroadcastTimerInstance extends InstanceBase {
     this.updateVariableValues()
     this.updateStatus(InstanceStatus.Connecting)
     this.startBlinkTimer()
+    this.startTickTimer()
     this.connect()
   }
 
   async destroy() {
     this.destroyed = true
     this.stopBlinkTimer()
+    this.stopTickTimer()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -179,14 +188,30 @@ class BroadcastTimerInstance extends InstanceBase {
       direction: t.direction || 'down',
       valueSeconds: typeof t.valueSeconds === 'number' ? t.valueSeconds : 0
     }
+    this.anchorValueSeconds = this.state.valueSeconds
+    this.anchorAtMs = Date.now()
     this.updateVariableValues()
     this.checkFeedbacks('running', 'expired', 'visible', 'direction')
+  }
+
+  // Live value extrapolated from the last server push, matching the same
+  // math the server/display pages use, so it keeps advancing between pushes
+  // instead of sitting frozen at the value from when the timer last started.
+  currentValueSeconds() {
+    if (!this.state.running) return this.anchorValueSeconds
+    const elapsedSec = (Date.now() - this.anchorAtMs) / 1000
+    const v = this.state.direction === 'up'
+      ? this.anchorValueSeconds + elapsedSec
+      : this.anchorValueSeconds - elapsedSec
+    return Math.max(0, v)
   }
 
   updateVariableDefinitions() {
     this.setVariableDefinitions({
       name: { name: 'Timer name' },
       value: { name: 'Full value, HH:MM:SS' },
+      value_mmss: { name: 'Value, MM:SS (total minutes, uncapped at 59 -- e.g. 125:07)' },
+      value_ss: { name: 'Value, total whole seconds (e.g. 45, or 7505)' },
       digit_h1: { name: 'Hours - tens digit' },
       digit_h2: { name: 'Hours - ones digit' },
       digit_m1: { name: 'Minutes - tens digit' },
@@ -201,11 +226,21 @@ class BroadcastTimerInstance extends InstanceBase {
   }
 
   updateVariableValues() {
-    const text = formatDuration(this.state.valueSeconds)
+    const liveSeconds = this.currentValueSeconds()
+    const text = formatDuration(liveSeconds)
     const digits = text.replace(/:/g, '').split('')
+
+    const totalWhole = Math.max(0, Math.round(liveSeconds))
+    const mm = Math.floor(totalWhole / 60) // uncapped -- e.g. 125, not wrapped to hours
+    const ss = totalWhole % 60
+    const mmss = `${pad2(mm)}:${pad2(ss)}`
+    const ssOnly = pad2(totalWhole) // grows past 2 digits naturally for totals >= 100s
+
     this.setVariableValues({
       name: this.state.name,
       value: text,
+      value_mmss: mmss,
+      value_ss: ssOnly,
       digit_h1: digits[0],
       digit_h2: digits[1],
       digit_m1: digits[2],
@@ -232,6 +267,19 @@ class BroadcastTimerInstance extends InstanceBase {
   stopBlinkTimer() {
     if (this.blinkTimer) clearInterval(this.blinkTimer)
     this.blinkTimer = null
+  }
+
+  // Keeps value/value_mmss/value_ss/digit_* advancing once a second while
+  // the timer is running, independent of the server's discrete pushes.
+  startTickTimer() {
+    this.tickTimer = setInterval(() => {
+      if (this.state.running) this.updateVariableValues()
+    }, 1000)
+  }
+
+  stopTickTimer() {
+    if (this.tickTimer) clearInterval(this.tickTimer)
+    this.tickTimer = null
   }
 
   updateFeedbackDefinitions() {
@@ -301,6 +349,22 @@ class BroadcastTimerInstance extends InstanceBase {
       type: 'simple',
       name: 'Full timer value (HH:MM:SS)',
       style: { text: '$(broadcast-timer:value)', size: '18', color: colors.digit.color, bgcolor: colors.digit.bgcolor },
+      steps: [{ down: [], up: [] }],
+      feedbacks: [noOptionFeedback('expired', colors.expired)]
+    }
+
+    presets.value_mmss = {
+      type: 'simple',
+      name: 'Full timer value (MM:SS)',
+      style: { text: '$(broadcast-timer:value_mmss)', size: '24', color: colors.digit.color, bgcolor: colors.digit.bgcolor },
+      steps: [{ down: [], up: [] }],
+      feedbacks: [noOptionFeedback('expired', colors.expired)]
+    }
+
+    presets.value_ss = {
+      type: 'simple',
+      name: 'Full timer value (SS only)',
+      style: { text: '$(broadcast-timer:value_ss)', size: '30', color: colors.digit.color, bgcolor: colors.digit.bgcolor },
       steps: [{ down: [], up: [] }],
       feedbacks: [noOptionFeedback('expired', colors.expired)]
     }
@@ -375,7 +439,7 @@ class BroadcastTimerInstance extends InstanceBase {
       {
         id: 'value-and-digits',
         name: 'Value & Digits',
-        definitions: ['value', 'name', 'digit_h1', 'digit_h2', 'digit_m1', 'digit_m2', 'digit_s1', 'digit_s2']
+        definitions: ['value', 'value_mmss', 'value_ss', 'name', 'digit_h1', 'digit_h2', 'digit_m1', 'digit_m2', 'digit_s1', 'digit_s2']
       },
       {
         id: 'status',
