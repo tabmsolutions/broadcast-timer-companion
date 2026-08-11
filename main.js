@@ -43,6 +43,11 @@ class BroadcastTimerInstance extends InstanceBase {
     this.tickTimer = null
     this.destroyed = false
     this.state = { ...DEFAULT_STATE }
+    // When the timer most recently transitioned into expired, per this
+    // module's own clock -- used to bound the "expired" flash to a
+    // configurable duration. Deliberately independent of the server's own
+    // (also duration-bounded) flash timing; see getConfigFields() below.
+    this.expiredAtMs = null
     // Anchor for local interpolation between WebSocket pushes: the server
     // only pushes on discrete state changes (start/stop/set/...), not on
     // every tick of a running countdown, so without this the displayed
@@ -115,6 +120,26 @@ class BroadcastTimerInstance extends InstanceBase {
         width: 3,
         default: 'timer1',
         tooltip: 'The id shown on the timer\'s card in /admin, e.g. "timer1". One module instance watches one timer.'
+      },
+      {
+        type: 'number',
+        id: 'expiredFlashSeconds',
+        label: 'Expired flash duration (sec, 0 = forever)',
+        width: 4,
+        default: 5,
+        min: 0,
+        max: 3600,
+        tooltip: 'How long the "Timer expired (flashes)" feedback keeps blinking after a countdown hits zero, before settling solid. Timed independently of the server/display’s own flash duration.'
+      },
+      {
+        type: 'number',
+        id: 'warnThresholdSeconds',
+        label: 'Warn threshold (sec remaining, 0 = off)',
+        width: 4,
+        default: 0,
+        min: 0,
+        max: 3600,
+        tooltip: 'The "Timer warning" feedback becomes true once a running countdown has this many seconds or fewer left. Computed independently of the server/display’s own warning threshold.'
       }
     ]
   }
@@ -211,6 +236,7 @@ class BroadcastTimerInstance extends InstanceBase {
   }
 
   applyState(t) {
+    const wasExpired = this.state.expired
     this.state = {
       name: t.name || '',
       mode: t.mode || 'clock',
@@ -219,10 +245,12 @@ class BroadcastTimerInstance extends InstanceBase {
       direction: t.direction || 'down',
       valueSeconds: typeof t.valueSeconds === 'number' ? t.valueSeconds : 0
     }
+    if (this.state.expired && !wasExpired) this.expiredAtMs = Date.now()
+    if (!this.state.expired) this.expiredAtMs = null
     this.anchorValueSeconds = this.state.valueSeconds
     this.anchorAtMs = Date.now()
     this.updateVariableValues()
-    this.checkFeedbacks('running', 'expired', 'visible', 'direction')
+    this.checkFeedbacks('running', 'expired', 'visible', 'direction', 'warning')
   }
 
   // Live value extrapolated from the last server push, matching the same
@@ -287,12 +315,27 @@ class BroadcastTimerInstance extends InstanceBase {
 
   // Companion has no native "blink" primitive; a feedback just re-evaluates
   // when told to. Toggling blinkPhase and re-checking the 'expired'
-  // feedback on an interval is what makes the button flash.
+  // feedback on an interval is what makes the button flash. Also where the
+  // configured flash duration cuts the blink off, since that's a
+  // time-based transition with no discrete event to hang it on.
   startBlinkTimer() {
     this.blinkTimer = setInterval(() => {
       this.blinkPhase = !this.blinkPhase
       if (this.state.expired && !this.state.running) this.checkFeedbacks('expired')
     }, 500)
+  }
+
+  // 0 (or unset/invalid) means "flash forever", matching the server's own
+  // flashDurationSeconds semantics -- though this module's timer is its own
+  // independent clock, not read from the server.
+  expiredFlashDurationMs() {
+    const secs = Number(this.config && this.config.expiredFlashSeconds)
+    return Number.isFinite(secs) && secs > 0 ? secs * 1000 : 0
+  }
+
+  warnThresholdSeconds() {
+    const secs = Number(this.config && this.config.warnThresholdSeconds)
+    return Number.isFinite(secs) && secs > 0 ? secs : 0
   }
 
   stopBlinkTimer() {
@@ -301,10 +344,15 @@ class BroadcastTimerInstance extends InstanceBase {
   }
 
   // Keeps value/value_mmss/value_ss/digit_* advancing once a second while
-  // the timer is running, independent of the server's discrete pushes.
+  // the timer is running, independent of the server's discrete pushes. Also
+  // rechecks 'warning', since its threshold crossing happens continuously
+  // as the remaining time ticks down, not on a discrete server push.
   startTickTimer() {
     this.tickTimer = setInterval(() => {
-      if (this.state.running) this.updateVariableValues()
+      if (this.state.running) {
+        this.updateVariableValues()
+        this.checkFeedbacks('warning')
+      }
     }, 1000)
   }
 
@@ -326,10 +374,28 @@ class BroadcastTimerInstance extends InstanceBase {
       expired: {
         type: 'boolean',
         name: 'Timer expired (flashes)',
-        description: 'True on alternating ~500ms ticks while a countdown has hit zero and stopped, for a flashing button',
+        description: 'True on alternating ~500ms ticks while a countdown has hit zero and stopped, for a flashing button. Stops blinking (goes solid false) once the configured "Expired flash duration" elapses -- see this connection\'s config.',
         defaultStyle: { bgcolor: combineRgb(70, 34, 44), color: combineRgb(255, 255, 255) },
         options: [],
-        callback: () => this.state.expired && !this.state.running && this.blinkPhase
+        callback: () => {
+          if (!this.state.expired || this.state.running) return false
+          const durationMs = this.expiredFlashDurationMs()
+          if (durationMs > 0 && this.expiredAtMs != null && Date.now() - this.expiredAtMs >= durationMs) return false
+          return this.blinkPhase
+        }
+      },
+      warning: {
+        type: 'boolean',
+        name: 'Timer warning (below threshold)',
+        description: 'True while a running countdown has this many seconds or fewer remaining -- set via this connection\'s "Warn threshold" config field (0 = disabled). Solid, not flashing.',
+        defaultStyle: { bgcolor: combineRgb(102, 68, 0), color: combineRgb(255, 255, 255) },
+        options: [],
+        callback: () => {
+          const threshold = this.warnThresholdSeconds()
+          if (threshold <= 0) return false
+          if (!this.state.running || this.state.direction !== 'down') return false
+          return this.currentValueSeconds() <= threshold
+        }
       },
       visible: {
         type: 'boolean',
@@ -447,6 +513,7 @@ class BroadcastTimerInstance extends InstanceBase {
     const colors = {
       running: { bgcolor: combineRgb(34, 70, 44), color: combineRgb(255, 255, 255) },
       expired: { bgcolor: combineRgb(70, 34, 44), color: combineRgb(255, 255, 255) },
+      warning: { bgcolor: combineRgb(102, 68, 0), color: combineRgb(255, 255, 255) },
       visible: { bgcolor: combineRgb(45, 74, 99), color: combineRgb(255, 255, 255) },
       direction: { bgcolor: combineRgb(90, 74, 20), color: combineRgb(255, 255, 255) },
       idle: { bgcolor: combineRgb(20, 20, 20), color: combineRgb(180, 180, 180) },
@@ -520,6 +587,14 @@ class BroadcastTimerInstance extends InstanceBase {
       style: { text: 'EXPIRED', size: '14', color: colors.idle.color, bgcolor: colors.idle.bgcolor },
       steps: [{ down: [], up: [] }],
       feedbacks: [noOptionFeedback('expired', colors.expired)]
+    }
+
+    presets.warning = {
+      type: 'simple',
+      name: 'Warning indicator (below threshold)',
+      style: { text: 'WARNING', size: '14', color: colors.idle.color, bgcolor: colors.idle.bgcolor },
+      steps: [{ down: [], up: [] }],
+      feedbacks: [noOptionFeedback('warning', colors.warning)]
     }
 
     presets.visible = {
@@ -647,7 +722,7 @@ class BroadcastTimerInstance extends InstanceBase {
       {
         id: 'status',
         name: 'Status Indicators',
-        definitions: ['running', 'expired', 'visible', 'direction_down', 'direction_up']
+        definitions: ['running', 'expired', 'warning', 'visible', 'direction_down', 'direction_up']
       },
       {
         id: 'transport',

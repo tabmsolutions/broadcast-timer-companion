@@ -21,6 +21,14 @@ instance per timer. For each instance, set:
 - **Server port** — default `3000`
 - **Timer id** — matches the id shown on that timer's card in the server's
   `/admin` page (e.g. `timer1`)
+- **Expired flash duration (sec, 0 = forever)** — default `5`. How long the
+  "Timer expired (flashes)" feedback keeps blinking before settling solid.
+  Timed entirely within Companion — independent of the server/display's own
+  (separately configurable) flash duration, so the two don't have to match.
+- **Warn threshold (sec remaining, 0 = off)** — default `0`. The "Timer
+  warning" feedback goes true once a running countdown has this many
+  seconds or fewer left. Also computed entirely within Companion,
+  independent of the server/display's own warning threshold.
 
 ## Variables
 
@@ -68,7 +76,12 @@ won't sit frozen between those events.
 
 - **Timer running** — true while counting up/down
 - **Timer expired (flashes)** — true on alternating ticks while a countdown
-  has hit zero and stopped, so a button styled with this feedback flashes
+  has hit zero and stopped, so a button styled with this feedback flashes.
+  Stops blinking (goes solid false) once this connection's configured
+  "Expired flash duration" elapses.
+- **Timer warning (below threshold)** — true (solid, not blinking) while a
+  running countdown has this connection's configured "Warn threshold" or
+  fewer seconds remaining. Disabled by default (threshold `0`).
 - **Timer visible on display (mode = timer)** — true when the display is
   showing the timer rather than clock-only
 - **Direction is...** — true when the timer's direction matches the
@@ -83,9 +96,10 @@ hand:
   `SS`-only, a name button, and six individual digit buttons (for a
   scoreboard-style layout across separate buttons), all pre-wired with the
   flashing "expired" feedback. Display-only — no action attached.
-- **Status Indicators** — one button each for Running, Expired, Timer
-  visible, Direction: Down, and Direction: Up, styled with their matching
-  feedback so they light up on their own. Display-only — no action attached.
+- **Status Indicators** — one button each for Running, Expired, Warning,
+  Timer visible, Direction: Down, and Direction: Up, styled with their
+  matching feedback so they light up on their own. Display-only — no action
+  attached.
 - **Transport** — Start, Stop, Reset, Show, Hide, Count down, Count up. Start
   lights up green while running; Show lights up blue while the timer is
   visible; Count down/up light up while that's the active direction — these
