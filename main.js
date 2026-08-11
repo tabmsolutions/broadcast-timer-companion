@@ -503,6 +503,12 @@ class BroadcastTimerInstance extends InstanceBase {
         description: 'Switch the display back to clock-only (mode = clock)',
         options: [],
         callback: async () => this.postCommand('/hide')
+      },
+      setName: {
+        name: 'Set name',
+        description: "Change the timer's display name -- shown as the name header on /display and in this connection's `name` variable",
+        options: [{ type: 'textinput', id: 'name', label: 'Name', default: '' }],
+        callback: async (action) => this.postCommand('/name', { name: action.options.name })
       }
     })
   }
@@ -665,6 +671,16 @@ class BroadcastTimerInstance extends InstanceBase {
       feedbacks: []
     }
 
+    // Text-input action options can't be pre-filled per-preset with anything
+    // meaningful beyond an example -- duplicate and edit the Name option for
+    // other segment names, same as Quick Set below does for durations.
+    presets.act_set_name = {
+      ...actionOnly('setName', { name: 'Segment A' }),
+      name: 'Set name: "Segment A"',
+      style: { text: 'NAME: Segment A', size: 14, color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: []
+    }
+
     presets.act_direction_down = {
       ...actionOnly('direction', { direction: 'down' }),
       name: 'Count down',
@@ -727,7 +743,7 @@ class BroadcastTimerInstance extends InstanceBase {
       {
         id: 'transport',
         name: 'Transport',
-        definitions: ['act_start', 'act_stop', 'act_reset', 'act_show', 'act_hide', 'act_direction_down', 'act_direction_up']
+        definitions: ['act_start', 'act_stop', 'act_reset', 'act_show', 'act_hide', 'act_set_name', 'act_direction_down', 'act_direction_up']
       },
       {
         id: 'keypad',

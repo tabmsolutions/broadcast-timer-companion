@@ -71,6 +71,7 @@ won't sit frozen between those events.
 | **Clear entry** | — | Resets the digit-entry buffer to zero |
 | **Show timer** | — | Display shows the timer (mode = timer) |
 | **Hide timer** | — | Display goes back to clock-only |
+| **Set name** | Name (text) | Changes the timer's display name -- shown as the name header on `/display` and in the `name` variable |
 
 ## Feedbacks
 
@@ -100,10 +101,12 @@ hand:
   Timer visible, Direction: Down, and Direction: Up, styled with their
   matching feedback so they light up on their own. Display-only — no action
   attached.
-- **Transport** — Start, Stop, Reset, Show, Hide, Count down, Count up. Start
-  lights up green while running; Show lights up blue while the timer is
-  visible; Count down/up light up while that's the active direction — these
-  double as both the control and its own status indicator on one button.
+- **Transport** — Start, Stop, Reset, Show, Hide, Set name ("Segment A"),
+  Count down, Count up. Start lights up green while running; Show lights up
+  blue while the timer is visible; Count down/up light up while that's the
+  active direction — these double as both the control and its own status
+  indicator on one button. Set name is a starting point — duplicate and
+  edit its Name option for other segment names.
 - **Keypad** — one button per digit (0–9) plus Clear, for a numeric entry pad
   matching the server's own `/control` page.
 - **Quick Set** — Set 1:00, Set 5:00, Set 10:00 as starting points for common
