@@ -66,12 +66,24 @@ won't sit frozen between those events.
 | **Stop** | — | Pauses, keeping the current value |
 | **Reset** | — | Elapsed time back to zero; keeps configured duration/direction |
 | **Set direction** | Direction: Up/Down | Folds current elapsed value and stops the timer if it was running — press Start again after |
-| **Set time** | Hours, Minutes, Seconds | Ignored while running — Stop or Reset first |
+| **Set time** | Hours, Minutes, Seconds | Honoured whether stopped or running — a running timer continues from the new value |
+| **Adjust time** | Seconds (negative subtracts) | Relative nudge from the current value, never below zero; works while running. Made for rotary encoders — see *Knobs* below |
 | **Send digit** | Digit: 0–9 | Keypad-style entry: shifts one digit into a 6-digit HHMMSS buffer from the right (e.g. 1,2,3,0,0 → `00:12:30`). Ignored while running |
 | **Clear entry** | — | Resets the digit-entry buffer to zero |
 | **Show timer** | — | Display shows the timer (mode = timer) |
 | **Hide timer** | — | Display goes back to clock-only |
 | **Set name** | Name (text) | Changes the timer's display name -- shown as the name header on `/display` and in the `name` variable |
+
+## Knobs (rotary encoders)
+
+The *Knobs* presets put a whole encoder on one drag — a Stream Deck+ dial or
+a satellite panel's knob (e.g. the TAB M Galaxy Touch Panel). Turning nudges
+the timer by 1 min / 10 s / 1 s per detent (the **Adjust time** action on
+rotate left/right), pushing alternates **Start** and **Stop** (two steps,
+auto-progress), the face shows `value` and lights green while running. Drop
+one on the encoder's location, done. A fast spin accumulates correctly: the
+module advances its own live value as it sends, rather than waiting for the
+server's next state push.
 
 ## Feedbacks
 

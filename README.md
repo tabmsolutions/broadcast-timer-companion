@@ -3,7 +3,7 @@
 A [Bitfocus Companion](https://bitfocus.io/companion) module for a
 self-hosted [broadcast-timer](https://github.com/kgtpuck/broadcast-timer)
 server (a time-of-day clock / count up-down timer for broadcast use), with
-both **full control** (actions for start/stop/reset/set time/direction/
+both **full control** (actions for start/stop/reset/set time/adjust time/direction/
 digit entry/show/hide/rename — the entire REST API) and **live feedback** (variables
 and feedbacks Companion's built-in Generic HTTP module has no way to
 provide). One module instead of two: install this and you don't need a

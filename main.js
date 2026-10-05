@@ -253,6 +253,20 @@ class BroadcastTimerInstance extends InstanceBase {
     this.checkFeedbacks('running', 'expired', 'visible', 'direction', 'warning')
   }
 
+  // A relative nudge, for encoders. Computed from the live value and sent
+  // as an absolute /set (the server has no relative endpoint, and /set is
+  // honoured while running). The local anchor moves to the target at once:
+  // the server's state push arrives later than the next detent of a spin,
+  // and without this every click of a fast turn would start from the same
+  // stale value and the spin would collapse into one step.
+  async adjustBy(deltaSeconds) {
+    const target = Math.min(359999, Math.max(0, Math.round(this.currentValueSeconds()) + deltaSeconds))
+    this.anchorValueSeconds = target
+    this.anchorAtMs = Date.now()
+    this.updateVariableValues()
+    await this.postCommand('/set', { seconds: target })
+  }
+
   // Live value extrapolated from the last server push, matching the same
   // math the server/display pages use, so it keeps advancing between pushes
   // instead of sitting frozen at the value from when the timer last started.
@@ -471,7 +485,7 @@ class BroadcastTimerInstance extends InstanceBase {
       },
       set: {
         name: 'Set time',
-        description: 'Set the timer to a specific HH:MM:SS. Ignored while the timer is running — stop or reset it first.',
+        description: 'Set the timer to a specific HH:MM:SS. Honoured whether the timer is stopped or running -- a running timer continues from the new value.',
         options: [
           { type: 'number', id: 'hh', label: 'Hours', default: 0, min: 0, max: 99 },
           { type: 'number', id: 'mm', label: 'Minutes', default: 5, min: 0, max: 59 },
@@ -479,6 +493,23 @@ class BroadcastTimerInstance extends InstanceBase {
         ],
         callback: async (action) =>
           this.postCommand('/set', { hh: action.options.hh, mm: action.options.mm, ss: action.options.ss })
+      },
+      adjust: {
+        name: 'Adjust time',
+        description:
+          'Nudge the timer by a number of seconds relative to its current value (negative subtracts, never below zero). Works while running -- the timer continues from the new value. Made for a rotary encoder: +60 on rotate right, -60 on rotate left.',
+        options: [
+          {
+            type: 'number',
+            id: 'seconds',
+            label: 'Seconds (negative subtracts)',
+            default: 60,
+            min: -359999,
+            max: 359999,
+            step: 1
+          }
+        ],
+        callback: async (action) => this.adjustBy(Number(action.options.seconds) || 0)
       },
       digit: {
         name: 'Send digit',
@@ -729,7 +760,55 @@ class BroadcastTimerInstance extends InstanceBase {
       }
     }
 
+    // --- Knobs: a rotary encoder (Stream Deck+, a satellite panel's knob) on
+    // one drag. Turning nudges the timer, pushing alternates Start / Stop
+    // (two steps, auto-progress), the face shows the time and lights green
+    // while running. No expressions to type: the relative Adjust time action
+    // does the arithmetic.
+    const knobPreset = (stepSeconds, name) => {
+      const turn = {
+        rotate_left: [{ actionId: 'adjust', options: { seconds: -stepSeconds } }],
+        rotate_right: [{ actionId: 'adjust', options: { seconds: stepSeconds } }]
+      }
+      return {
+        type: 'simple',
+        name,
+        style: { text: '$(broadcast-timer:value)', size: '18', color: colors.digit.color, bgcolor: colors.digit.bgcolor },
+        // rotaryActions is not in @companion-module/base's preset type, but
+        // Companion reads it off the preset when the button is created
+        // (options.rotaryActions ?? false) -- without it the dropped button
+        // has Rotary Actions off and the turn does nothing.
+        options: { stepAutoProgress: true, rotaryActions: true },
+        steps: [
+          { name: 'Start', down: [{ actionId: 'start', options: {} }], up: [], ...turn },
+          { name: 'Stop', down: [{ actionId: 'stop', options: {} }], up: [], ...turn }
+        ],
+        feedbacks: [noOptionFeedback('running', colors.running), noOptionFeedback('expired', colors.expired)]
+      }
+    }
+    presets.knob_timer_1m = knobPreset(60, 'Timer knob: turn +/-1 min, push Start/Stop')
+    presets.knob_timer_10s = knobPreset(10, 'Timer knob: turn +/-10 s, push Start/Stop')
+    presets.knob_timer_1s = knobPreset(1, 'Timer knob: turn +/-1 s, push Start/Stop')
+
+    presets.act_adjust_plus = {
+      ...actionOnly('adjust', { seconds: 60 }),
+      name: 'Adjust: +1 min',
+      style: { text: '+1:00', size: 16, color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: []
+    }
+    presets.act_adjust_minus = {
+      ...actionOnly('adjust', { seconds: -60 }),
+      name: 'Adjust: -1 min',
+      style: { text: '-1:00', size: 16, color: combineRgb(255, 255, 255), bgcolor: combineRgb(20, 20, 20) },
+      feedbacks: []
+    }
+
     const structure = [
+      {
+        id: 'knobs',
+        name: 'Knobs (rotary encoders)',
+        definitions: ['knob_timer_1m', 'knob_timer_10s', 'knob_timer_1s']
+      },
       {
         id: 'value-and-digits',
         name: 'Value & Digits',
@@ -757,7 +836,7 @@ class BroadcastTimerInstance extends InstanceBase {
       {
         id: 'quick-set',
         name: 'Quick Set',
-        definitions: quickSets.map((q) => q.id)
+        definitions: [...quickSets.map((q) => q.id), 'act_adjust_plus', 'act_adjust_minus']
       }
     ]
 
